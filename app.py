@@ -6,8 +6,14 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
+from flask_socketio import SocketIO
+
+from github_controller import github_bp, register_github_socket_handlers
 
 app = Flask(__name__)
+socketio = SocketIO(app, cors_allowed_origins="*")
+app.register_blueprint(github_bp)
+register_github_socket_handlers(socketio)
 
 BASE_DIR = Path(__file__).resolve().parent
 COMMANDS_PATH = BASE_DIR / "commands.json"
@@ -127,6 +133,59 @@ def send_groupme_message(text, bot_id=None):
     return response.json()
 
 
+def fetch_latest_commit(repo_owner=None, repo_name=None):
+    owner = (repo_owner or os.getenv("GITHUB_REPO_OWNER") or "").strip()
+    name = (repo_name or os.getenv("GITHUB_REPO_NAME") or "").strip()
+    if not owner or not name:
+        raise RuntimeError("GITHUB_REPO_OWNER and GITHUB_REPO_NAME must be configured.")
+
+    url = f"https://api.github.com/repos/{owner}/{name}/commits?per_page=1"
+    headers = {"Accept": "application/vnd.github+json"}
+    token = os.getenv("GITHUB_TOKEN") or os.getenv("GITHUB_API_TOKEN")
+    if token:
+        headers["Authorization"] = f"token {token}"
+
+    response = requests.get(url, headers=headers, timeout=10)
+    response.raise_for_status()
+    payload = response.json()
+
+    if isinstance(payload, list):
+        if not payload:
+            raise RuntimeError(f"No commits found for {owner}/{name}.")
+        payload = payload[0]
+
+    if not isinstance(payload, dict):
+        raise RuntimeError("GitHub API did not return a valid commit payload.")
+
+    return payload
+
+
+def summarize_commit(payload):
+    commit_data = payload.get("commit") or {}
+    author = (commit_data.get("author") or {}).get("name") or "unknown"
+    message = (commit_data.get("message") or "").split("\n", 1)[0]
+    sha = payload.get("sha") or ""
+    url = payload.get("html_url") or f"https://github.com/{os.getenv('GITHUB_REPO_OWNER','')}/{os.getenv('GITHUB_REPO_NAME','')}/commit/{sha}"
+
+    return {
+        "sha": sha,
+        "message": message,
+        "author": author,
+        "url": url,
+    }
+
+
+def emit_latest_commit():
+    try:
+        payload = fetch_latest_commit()
+        summary = summarize_commit(payload)
+        socketio.emit("latest_commit", summary, broadcast=True)
+        return summary
+    except Exception as exc:  # pragma: no cover - runtime integration
+        socketio.emit("latest_commit_error", {"error": str(exc)}, broadcast=True)
+        raise
+
+
 def load_chat_bot_ids():
     """
     Load named chat targets from environment.
@@ -235,6 +294,34 @@ def health_check():
     return jsonify({"status": "ok"}), 200
 
 
+@app.route("/github/latest", methods=["GET"])
+def github_latest_commit():
+    try:
+        payload = fetch_latest_commit()
+        return jsonify({"ok": True, "commit": summarize_commit(payload)})
+    except Exception as exc:  # pragma: no cover - runtime integration
+        app.logger.exception("Failed to fetch latest GitHub commit: %s", exc)
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route("/github/webhook", methods=["POST"])
+def github_webhook():
+    event = request.headers.get("X-GitHub-Event", "")
+    payload = request.get_json(silent=True) or {}
+
+    if event and event != "push":
+        return jsonify({"ok": True, "event": event})
+
+    try:
+        latest = fetch_latest_commit()
+        summary = summarize_commit(latest)
+        socketio.emit("latest_commit", summary, broadcast=True)
+        return jsonify({"ok": True, "event": event or "push", "commit": summary})
+    except Exception as exc:  # pragma: no cover - runtime integration
+        app.logger.exception("GitHub webhook fetch failed: %s", exc)
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
 @app.route("/groupme", methods=["POST"])
 def groupme_webhook():
     payload = request.get_json(silent=True) or {}
@@ -273,4 +360,4 @@ def groupme_webhook():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=False)
+    socketio.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=False)
