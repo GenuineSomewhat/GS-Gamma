@@ -52,6 +52,29 @@ def load_commands():
 app.config["COMMANDS"], app.config["COMMAND_INDICATOR"] = load_commands()
 
 
+def refresh_commands_config():
+    commands, indicator = load_commands()
+    app.config["COMMANDS"] = commands
+    app.config["COMMAND_INDICATOR"] = indicator
+
+
+def is_placeholder_value(value):
+    if value is None:
+        return True
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return True
+
+    placeholder_fragments = (
+        "your_",
+        "_here",
+        "placeholder",
+        "change_me",
+        "example",
+    )
+    return any(fragment in normalized for fragment in placeholder_fragments)
+
+
 def normalize_text(raw_text, indicator=None):
     if not isinstance(raw_text, str):
         return ""
@@ -231,7 +254,7 @@ def handle_send_message(argument_text):
 
 def is_authorized_user(sender_id):
     allowed_user_id = os.getenv("GROUPME_USER_ID")
-    if not allowed_user_id:
+    if is_placeholder_value(allowed_user_id):
         return True
     return sender_id == allowed_user_id
 
@@ -243,6 +266,8 @@ def health_check():
 
 @app.route("/groupme", methods=["POST"])
 def groupme_webhook():
+    refresh_commands_config()
+
     payload = request.get_json(silent=True) or {}
     message_text = payload.get("text", "")
     sender_id = payload.get("sender_id") or payload.get("user_id")
