@@ -1,0 +1,27 @@
+{
+  "indicator": "/",
+  "commands": [
+    {
+      "name": "help",
+      "aliases": ["?", "h"],
+      "response": "Available commands: /help, /status, /echo <message>, /send \"<message>\" chat1, chat2"
+    },
+    {
+      "name": "status",
+      "aliases": ["st"],
+      "response": "Bot is online and ready!"
+    },
+    {
+      "name": "echo",
+      "aliases": [],
+      "response": "{arg}"
+    },
+    {
+      "name": "send",
+      "args": ["<message>", "chat1", "chat2", "chat3"],
+      "aliases": [],
+      "response": "Usage: /send \"<message>\" chat1, chat2, chat3",
+      "function": "sendMessage"
+    }
+  ]
+}
