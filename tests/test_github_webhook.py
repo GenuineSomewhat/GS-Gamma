@@ -1,7 +1,8 @@
 import unittest
 from unittest.mock import patch
 
-from app import app, summarize_commit, fetch_latest_commit
+from app import app
+from github_controller import fetch_latest_commit, summarize_commit
 
 
 class GitHubWebhookTests(unittest.TestCase):
@@ -9,7 +10,7 @@ class GitHubWebhookTests(unittest.TestCase):
         app.config.update(TESTING=True)
         self.client = app.test_client()
 
-    @patch("app.requests.get")
+    @patch("github_controller.requests.get")
     def test_fetch_latest_commit_requests_github_api(self, mock_get):
         mock_get.return_value.json.return_value = {
             "sha": "abc123",
@@ -38,7 +39,7 @@ class GitHubWebhookTests(unittest.TestCase):
         self.assertEqual(summary["message"], "fix: update commit fetch")
         self.assertIn("github.com", summary["url"])
 
-    @patch("app.fetch_latest_commit")
+    @patch("github_controller.fetch_latest_commit")
     def test_github_webhook_returns_commit_payload(self, mock_fetch):
         mock_fetch.return_value = {
             "sha": "123", "commit": {"message": "feat: new release"}, "html_url": "https://github.com/demo/repo/commit/123"

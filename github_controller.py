@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import os
 
 import requests
@@ -88,9 +90,26 @@ def github_latest_commit():
         return jsonify({"ok": False, "error": str(exc)}), 500
 
 
+def verify_github_signature(raw_body, signature_header):
+    secret = os.getenv("GITHUB_WEBHOOK_SECRET", "").strip()
+    if not secret:
+        return True
+
+    expected_signature = "sha256=" + hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
+    if not signature_header:
+        return False
+    return hmac.compare_digest(signature_header, expected_signature)
+
+
 @github_bp.route("/webhookgammabot", methods=["POST"])
 @github_bp.route("/github/webhook", methods=["POST"])
 def github_webhook():
+    raw_body = request.get_data()
+    signature = request.headers.get("X-Hub-Signature-256", "")
+
+    if not verify_github_signature(raw_body, signature):
+        return jsonify({"ok": False, "error": "invalid signature"}), 403
+
     event = request.headers.get("X-GitHub-Event", "")
     payload = request.get_json(silent=True) or {}
 
