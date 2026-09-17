@@ -88,6 +88,7 @@ def github_latest_commit():
         return jsonify({"ok": False, "error": str(exc)}), 500
 
 
+@github_bp.route("/webhookgammabot", methods=["POST"])
 @github_bp.route("/github/webhook", methods=["POST"])
 def github_webhook():
     event = request.headers.get("X-GitHub-Event", "")
